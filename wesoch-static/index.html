@@ -24,8 +24,7 @@ body {
 
     <hr>
 
-    <div id="settings-alert-danger" class="alert alert-danger" role="alert" style="display: none"></div>
-    <div id="settings-alert-success" class="alert alert-success" role="alert" style="display: none"></div>
+    <div id="settings-alert" class="alert alert-dark" role="alert" style="display: none"></div>
 
     <form method="POST" id="settings-form">
         <div class="form-group">
@@ -43,13 +42,14 @@ body {
             <input type="text" class="form-control" id="settings-nickname" name="settings-nickname" value="Cristian">
         </div>
 
-        <input type="submit" class="btn btn-block btn-dark" value="Connect">
+        <input type="submit" class="btn btn-block btn-dark" value="[ Connect ]">
     </form>
 </div>
 
 <div id="chat-container" style="display: none;">
     <div class="btn-group" role="group" aria-label="Basic example">
-        <button type="button" class="btn btn-dark" id="chat-settings-button">Back to Settings</button>
+        <button type="button" class="btn btn-dark" id="chat-settings-button">[ Back to Settings ]</button>
+        <button type="button" class="btn btn-dark" id="chat-reconnect-button">[ Reconnect ]</button>
     </div>
 
     <hr>
@@ -62,9 +62,9 @@ body {
 
     <form method="POST" id="chat-form">
         <div class="form-group">
-            <input type="text" class="form-control" id="chat-message" name="chat-message" autocomplete="off">
+            <input type="text" class="form-control" id="chat-message" name="chat-message" autocomplete="off" placeholder="Type a message">
         </div>
-        <input type="submit" class="btn btn-block btn-dark" value="Send">
+        <input type="submit" class="btn btn-block btn-dark" value="[ Send ]">
     </form>
 </div>
 
@@ -77,128 +77,205 @@ body {
 <script>
 
 $(document).ready(function() {
-
     const settings = {};
+    const chat     = {};
+
     settings.dom = {};
+    chat.dom     = {};
+
     settings.dom.containerDiv  = $("#settings-container");
+    settings.dom.alertDiv      = $("#settings-alert");
     settings.dom.form          = $("#settings-form");
     settings.dom.urlInput      = $("#settings-url");
     settings.dom.roomInput     = $("#settings-room");
     settings.dom.nicknameInput = $("#settings-nickname");
 
-    const chat = {};
-    chat.dom = {};
-    chat.dom.containerDiv   = $("#chat-container");
-    chat.dom.settingsButton = $("#chat-settings-button");
-    chat.dom.h1             = $("#chat-title");
-    chat.dom.messagesDiv    = $("#chat-messages");
-    chat.dom.form           = $("#chat-form");
-    chat.dom.messageInput   = $("#chat-message");
+    chat.dom.containerDiv    = $("#chat-container");
+    chat.dom.settingsButton  = $("#chat-settings-button");
+    chat.dom.reconnectButton = $("#chat-reconnect-button");
+    chat.dom.h1              = $("#chat-title");
+    chat.dom.messagesDiv     = $("#chat-messages");
+    chat.dom.form            = $("#chat-form");
+    chat.dom.messageInput    = $("#chat-message");
 
-    var chatUrl      = null;
-    var chatRoom     = null;
-    var chatNickname = null;
+    settings.url      = null;
+    settings.room     = null;
+    settings.nickname = null;
 
     var ws = null;
 
-    const wsOnOpen = function(event) {
+    var logOnClose = false;
+
+    settings.show = function() {
+        settings.dom.containerDiv.show("fast");
+    };
+
+    settings.hide = function() {
+        settings.dom.containerDiv.hide("fast");
+    };
+
+    settings.alert = function(text) {
+        settings.dom.alertDiv.text(text).show("fast").delay(2000).hide("fast");
+    };
+
+    chat.show = function() {
+        chat.dom.h1.text("Wesoch: " + settings.room);
+        chat.dom.messagesDiv.empty();
+        chat.dom.messageInput.val("");
+        chat.dom.containerDiv.show("fast");
+    };
+
+    chat.hide = function() {
+        chat.dom.h1.text("Wesoch: ");
+        chat.dom.messagesDiv.empty();
+        chat.dom.messageInput.val("")
+        chat.dom.containerDiv.hide("fast");
+    };
+
+    const command = {};
+
+    command.handler = {};
+
+    command.handler.message = function(data) {
+        const dt = data.dateTime;
+
+        const text = ""
+            + "[" + dt.date.year.toString().padStart(4, "0") + "-" + dt.date.month.toString().padStart(2, "0") + "-" + dt.date.day.toString().padStart(2, "0") + " " + dt.time.hour.toString().padStart(2, "0") + ":" + dt.time.minute.toString().padStart(2, "0") + ":" + dt.time.second.toString().padStart(2, "0") + "] "
+            + "[" + data.user + "] "
+            + data.text;
+
+        const p = document.createElement("p");
+
+        $(p).text(text);
+
+        chat.dom.messagesDiv.append(p);
+    }
+
+    const websocket = {};
+
+    websocket.handler = {};
+
+    websocket.handler.onOpen = function(event) {
         console.log("[INFO] web socket: onopen", event);
 
-        const command = {
+        logOnClose = true;
+
+        const cmd = {
             "type": "init",
             "data": {
-                "room"    : chatRoom,
-                "nickname": chatNickname,
+                "room"    : settings.room,
+                "nickname": settings.nickname,
             }
         };
 
-        ws.send(JSON.stringify(command));
+        if (ws.readyState == ws.OPEN) {
+            ws.send(JSON.stringify(cmd));
+
+            settings.hide();
+            chat.show();
+        } else {
+            settings.alert("[INFO] The connection is not open");
+
+            ws.close();
+        }
     };
 
-    const wsOnMessage = function(event) {
+    websocket.handler.onMessage = function(event) {
         console.log("[INFO] web socket: onmessage", event);
 
-        const command = JSON.parse(event.data);
+        const cmd = JSON.parse(event.data);
 
-        switch (command.type) {
+        switch (cmd.type) {
         case "message":
-            const data = command.data;
-            const dt = data.dateTime;
-
-            const text = ""
-                + "[" + dt.date.year.toString().padStart(4, "0") + "-" + dt.date.month.toString().padStart(2, "0") + "-" + dt.date.day.toString().padStart(2, "0") + " " + dt.time.hour.toString().padStart(2, "0") + ":" + dt.time.minute.toString().padStart(2, "0") + ":" + dt.time.second.toString().padStart(2, "0") + "] "
-                + "[" + data.user + "] "
-                + data.text;
-
-            const p = document.createElement("p");
-
-            $(p).text(text);
-
-            chat.dom.messagesDiv.append(p);
+            command.handler.message(cmd.data);
 
             break;
         }
     };
 
-    const wsOnClose = function(event) {
+    websocket.handler.onClose = function(event) {
         console.log("[INFO] web socket: onclose", event);
 
+        chat.hide();
+        settings.show();
 
+        if (logOnClose) {
+            settings.alert("[INFO] Connection closed.");
+        }
+
+        logOnClose = false;
     };
 
-    const wsOnError = function(event) {
+    websocket.handler.onError = function(event) {
         console.log("[ERROR] web socket: onerror", event);
+
+        settings.alert("[ERROR] Connection error.");
     };
 
     settings.dom.form.submit(function(event) {
-        chatUrl      = settings.dom.urlInput.val();
-        chatRoom     = settings.dom.roomInput.val();
-        chatNickname = settings.dom.nicknameInput.val();
+        event.preventDefault();
+
+        settings.url      = settings.dom.urlInput.val();
+        settings.room     = settings.dom.roomInput.val();
+        settings.nickname = settings.dom.nicknameInput.val();
 
         if (ws !== null) {
             ws.close();
         }
 
-        ws = new WebSocket(chatUrl);
+        ws = new WebSocket(settings.url);
 
-        ws.onopen    = wsOnOpen;
-        ws.onmessage = wsOnMessage;
-        ws.onclose   = wsOnClose;
-        ws.onerror   = wsOnError;
-
-        settings.dom.containerDiv.hide("fast");
-        chat.dom.h1.text("Wesoch: " + chatRoom);
-        chat.dom.containerDiv.show("fast");
-
-        event.preventDefault();
+        ws.onopen    = websocket.handler.onOpen;
+        ws.onmessage = websocket.handler.onMessage;
+        ws.onclose   = websocket.handler.onClose;
+        ws.onerror   = websocket.handler.onError;
     });
 
     chat.dom.form.submit(function(event) {
+        event.preventDefault();
+
         const text = chat.dom.messageInput.val();
 
-        const command = {
+        if (text === "") {
+
+            return;
+        }
+
+        const cmd = {
             "type": "message",
             "data": text
         };
 
         if (ws.readyState === ws.OPEN) {
-            ws.send(JSON.stringify(command));
+            ws.send(JSON.stringify(cmd));
         } else {
             ws.close();
         }
 
         chat.dom.messageInput.val("");
-
-        event.preventDefault();
     });
 
     chat.dom.settingsButton.click(function(event) {
+        event.preventDefault();
+
         ws.close();
-        chat.dom.containerDiv.hide("fast");
-        settings.dom.containerDiv.show("fast");
+
+        chat.hide();
+        settings.show();
     });
 
-    
+    chat.dom.reconnectButton.click(function(event) {
+        event.preventDefault();
+
+        ws.close();
+
+        ws = new WebSocket(settings.url);
+
+        ws.onopen    = websocket.handler.onOpen;
+        ws.onmessage = websocket.handler.onMessage;
+        ws.onclose   = websocket.handler.onClose;
+        ws.onerror   = websocket.handler.onError;
+    });
 });
 
 </script>
