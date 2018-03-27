@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+<link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+
+<style type="text/css">
+body {
+    font-family: monospace!important;
+}
+</style>
+
+<title>Wesoch</title>
+
+</head>
+<body>
+<div class="container">
+
+<div id="settings-container">
+    <h1>Wesoch: Settings</h1>
+
+    <hr>
+
+    <div id="settings-alert-danger" class="alert alert-danger" role="alert" style="display: none"></div>
+    <div id="settings-alert-success" class="alert alert-success" role="alert" style="display: none"></div>
+
+    <form method="POST" id="settings-form">
+        <div class="form-group">
+            <label for="url">URL</label>
+            <input type="text" class="form-control" id="settings-url" name="settings-url" value="wss://127.0.0.1:7443/chat">
+        </div>
+
+        <div class="form-group">
+            <label for="room">Room</label>
+            <input type="text" class="form-control" id="settings-room" name="settings-room" value="off-topic">
+        </div>
+
+        <div class="form-group">
+            <label for="nickname">Nickname</label>
+            <input type="text" class="form-control" id="settings-nickname" name="settings-nickname" value="Cristian">
+        </div>
+
+        <input type="submit" class="btn btn-block btn-dark" value="Connect">
+    </form>
+</div>
+
+<div id="chat-container" style="display: none;">
+    <div class="btn-group" role="group" aria-label="Basic example">
+        <button type="button" class="btn btn-dark" id="chat-settings-button">Back to Settings</button>
+    </div>
+
+    <hr>
+
+    <h1 id="chat-title"></h1>
+
+    <hr>
+
+    <div id="chat-messages"></div>
+
+    <form method="POST" id="chat-form">
+        <div class="form-group">
+            <input type="text" class="form-control" id="chat-message" name="chat-message" autocomplete="off">
+        </div>
+        <input type="submit" class="btn btn-block btn-dark" value="Send">
+    </form>
+</div>
+
+</div><!-- .container -->
+
+<script src="https://code.jquery.com/jquery-3.3.1.min.js" integrity="sha256-FgpCb/KJQlLNfOu91ta32o/NMZxltwRo8QtmkMRdAu8=" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js" integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q" crossorigin="anonymous"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js" integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl" crossorigin="anonymous"></script>
+
+<script>
+
+$(document).ready(function() {
+
+    const settings = {};
+    settings.dom = {};
+    settings.dom.containerDiv  = $("#settings-container");
+    settings.dom.form          = $("#settings-form");
+    settings.dom.urlInput      = $("#settings-url");
+    settings.dom.roomInput     = $("#settings-room");
+    settings.dom.nicknameInput = $("#settings-nickname");
+
+    const chat = {};
+    chat.dom = {};
+    chat.dom.containerDiv   = $("#chat-container");
+    chat.dom.settingsButton = $("#chat-settings-button");
+    chat.dom.h1             = $("#chat-title");
+    chat.dom.messagesDiv    = $("#chat-messages");
+    chat.dom.form           = $("#chat-form");
+    chat.dom.messageInput   = $("#chat-message");
+
+    var chatUrl      = null;
+    var chatRoom     = null;
+    var chatNickname = null;
+
+    var ws = null;
+
+    const wsOnOpen = function(event) {
+        console.log("[INFO] web socket: onopen", event);
+
+        const command = {
+            "type": "init",
+            "data": {
+                "room"    : chatRoom,
+                "nickname": chatNickname,
+            }
+        };
+
+        ws.send(JSON.stringify(command));
+    };
+
+    const wsOnMessage = function(event) {
+        console.log("[INFO] web socket: onmessage", event);
+
+        const command = JSON.parse(event.data);
+
+        switch (command.type) {
+        case "message":
+            const data = command.data;
+            const dt = data.dateTime;
+
+            const text = ""
+                + "[" + dt.date.year.toString().padStart(4, "0") + "-" + dt.date.month.toString().padStart(2, "0") + "-" + dt.date.day.toString().padStart(2, "0") + " " + dt.time.hour.toString().padStart(2, "0") + ":" + dt.time.minute.toString().padStart(2, "0") + ":" + dt.time.second.toString().padStart(2, "0") + "] "
+                + "[" + data.user + "] "
+                + data.text;
+
+            const p = document.createElement("p");
+
+            $(p).text(text);
+
+            chat.dom.messagesDiv.append(p);
+
+            break;
+        }
+    };
+
+    const wsOnClose = function(event) {
+        console.log("[INFO] web socket: onclose", event);
+
+
+    };
+
+    const wsOnError = function(event) {
+        console.log("[ERROR] web socket: onerror", event);
+    };
+
+    settings.dom.form.submit(function(event) {
+        chatUrl      = settings.dom.urlInput.val();
+        chatRoom     = settings.dom.roomInput.val();
+        chatNickname = settings.dom.nicknameInput.val();
+
+        if (ws !== null) {
+            ws.close();
+        }
+
+        ws = new WebSocket(chatUrl);
+
+        ws.onopen    = wsOnOpen;
+        ws.onmessage = wsOnMessage;
+        ws.onclose   = wsOnClose;
+        ws.onerror   = wsOnError;
+
+        settings.dom.containerDiv.hide("fast");
+        chat.dom.h1.text("Wesoch: " + chatRoom);
+        chat.dom.containerDiv.show("fast");
+
+        event.preventDefault();
+    });
+
+    chat.dom.form.submit(function(event) {
+        const text = chat.dom.messageInput.val();
+
+        const command = {
+            "type": "message",
+            "data": text
+        };
+
+        if (ws.readyState === ws.OPEN) {
+            ws.send(JSON.stringify(command));
+        } else {
+            ws.close();
+        }
+
+        chat.dom.messageInput.val("");
+
+        event.preventDefault();
+    });
+
+    chat.dom.settingsButton.click(function(event) {
+        ws.close();
+        chat.dom.containerDiv.hide("fast");
+        settings.dom.containerDiv.show("fast");
+    });
+
+    
+});
+
+</script>
+
+</body>
+</html>
