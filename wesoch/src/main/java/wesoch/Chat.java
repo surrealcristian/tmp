@@ -1,6 +1,8 @@
 package wesoch;
 
 import com.google.gson.Gson;
+import wesoch.domain.Room;
+import wesoch.domain.User;
 
 import javax.websocket.Session;
 import java.io.IOException;
@@ -8,20 +10,21 @@ import java.time.LocalDateTime;
 import java.util.*;
 
 public class Chat {
-    private final Map<String, Session> sessions = Collections.synchronizedMap(new HashMap<>());
-    private final Map<String, Room> rooms = Collections.synchronizedMap(new HashMap<>());
-    private final Map<String, User> users = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, Integer> roomNameToRoomId = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, Integer> userNameToUserId = Collections.synchronizedMap(new HashMap<>());
 
-    private final Map<String, Set<Session>> userSessionMap = Collections.synchronizedMap(new HashMap<>());
-    private final Map<String, User> sessionUserMap = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, Session> sessionIdToSession = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, Room> roomNameToRoom = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, User> userNameToUser = Collections.synchronizedMap(new HashMap<>());
 
-    private final Map<String, Set<User>> roomUsersMap = Collections.synchronizedMap(new HashMap<>());
-    private final Map<String, Room> userRoomMap = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, Set<Session>> userNameToSessions = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, User> sessionIdToUser = Collections.synchronizedMap(new HashMap<>());
+
+    private final Map<String, Set<User>> roomNameToUsers = Collections.synchronizedMap(new HashMap<>());
+    private final Map<String, Room> userNameToRoom = Collections.synchronizedMap(new HashMap<>());
 
     public void onOpen(Session session) {
-        synchronized (this.sessions) {
-            this.sessions.put(session.getId(), session);
-        }
+        sessionIdToSession.putIfAbsent(session.getId(), session);
     }
 
     public void onMessage(Session session, String text) {
@@ -31,10 +34,10 @@ public class Chat {
 
         switch ((String) command.get("type")) {
             case "init":
-                this.processInitCommand(session, (Map<String, Object>) command.get("data"));
+                processInitCommand(session, (Map<String, Object>) command.get("data"));
                 break;
             case "message":
-                this.processMessageCommand(session, (String) command.get("data"));
+                processMessageCommand(session, (String) command.get("data"));
                 break;
             default:
                 break;
@@ -42,35 +45,36 @@ public class Chat {
     }
 
     public void onClose(Session session) {
-        User user = null;
-
-        user = this.sessionUserMap.get(session.getId());
+        User user = sessionIdToUser.get(session.getId());
 
         if (user == null) {
             return;
         }
 
-        this.sessionUserMap.remove(session.getId());
 
-        Set<Session> userSessions = this.userSessionMap.get(user.getNickname());
+        sessionIdToUser.remove(session.getId());
+
+
+        Set<Session> userSessions = userNameToSessions.get(user.getName());
 
         if (userSessions != null) {
             userSessions.remove(session);
         }
 
-        Room room = null;
 
-        room = this.userRoomMap.get(user.getNickname());
+        Room room = userNameToRoom.get(user.getName());
 
         if (room != null) {
-            this.userRoomMap.remove(user.getNickname());
+            userNameToRoom.remove(user.getName());
         }
 
-        this.roomUsersMap.remove(room.getName());
 
-        this.users.remove(user.getNickname());
+        roomNameToUsers.remove(room.getName());
 
-        this.sessions.remove(session.getId());
+        userNameToUser.remove(user.getName());
+
+        sessionIdToSession.remove(session.getId());
+
 
         try {
             session.close();
@@ -83,61 +87,33 @@ public class Chat {
         final String roomName = (String) data.get("room");
         final String nickname = (String) data.get("nickname");
 
-        User user = this.users.get(nickname);
+        User user = userNameToUser.putIfAbsent(nickname, new User(nickname));
 
-        if (user == null) {
-            user = new User(nickname);
+        Set<Session> userSessions = userNameToSessions.putIfAbsent(nickname, Collections.synchronizedSet(new HashSet<>()));
 
-            this.users.put(nickname, user);
-        }
+        userSessions.add(session);
 
-        Set<Session> userSessions = this.userSessionMap.get(nickname);
+        sessionIdToUser.putIfAbsent(session.getId(), user);
 
-        if (userSessions == null) {
-            Set<Session> sessions = Collections.synchronizedSet(new HashSet<>());
-            sessions.add(session);
-            this.userSessionMap.put(nickname, sessions);
-        } else {
-            userSessions.add(session);
-        }
+        roomNameToRoom.putIfAbsent(roomName, new Room(roomName));
 
-        if (this.sessionUserMap.get(session.getId()) == null) {
-            this.sessionUserMap.put(session.getId(), this.users.get(nickname));
-        }
+        roomNameToUsers.putIfAbsent(roomName, Collections.synchronizedSet(new HashSet<>()));
 
-        if (this.rooms.get(roomName) == null) {
-            Room room = new Room();
+        roomNameToUsers.get(roomName).add(user);
 
-            room.setName(roomName);
-
-            this.rooms.put(roomName, room);
-        }
-
-        if (this.roomUsersMap.get(roomName) == null) {
-            this.roomUsersMap.put(roomName, Collections.synchronizedSet(new HashSet<User>()));
-        }
-
-        this.roomUsersMap.get(roomName).add(this.users.get(nickname));
-
-        if (this.userRoomMap.get(nickname) == null) {
-            this.userRoomMap.put(nickname, this.rooms.get(roomName));
-        }
+        userNameToRoom.putIfAbsent(nickname, roomNameToRoom.get(roomName));
     }
 
     private void processMessageCommand(Session session, String text) {
-        User user;
+        User user = sessionIdToUser.get(session.getId());
 
-        user = this.sessionUserMap.get(session.getId());
+        Room room = userNameToRoom.get(user.getName());
 
-        Room room;
-
-        room = this.userRoomMap.get(user.getNickname());
-
-        for (final User u : this.roomUsersMap.get(room.getName())) {
-            for (final Session s : this.userSessionMap.get(u.getNickname())) {
+        for (final User u : roomNameToUsers.get(room.getName())) {
+            for (final Session s : userNameToSessions.get(u.getName())) {
                 Gson gson = new Gson();
 
-                ServerToClientMessageData data = new ServerToClientMessageData(user.getNickname(), LocalDateTime.now(), text);
+                ServerToClientMessageData data = new ServerToClientMessageData(user.getName(), LocalDateTime.now(), text);
 
                 Map<String, Object> command = new HashMap<>();
                 command.put("type", "message");

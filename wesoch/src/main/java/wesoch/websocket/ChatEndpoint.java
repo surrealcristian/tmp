@@ -1,20 +1,20 @@
-package wesoch;
+package wesoch.websocket;
+
+import wesoch.Chat;
 
 import javax.websocket.*;
 import javax.websocket.server.ServerEndpoint;
 
-@ClientEndpoint
 @ServerEndpoint(value = "/chat")
 public class ChatEndpoint {
-    private static Chat chat = new Chat();
-    private Session session;
+    private static final Chat chat = new Chat();
 
     @OnOpen
     public void onOpen(Session session, EndpointConfig config) {
         System.out.println("[INFO] Current thread ID: " + Thread.currentThread().getId());
         System.out.println("[INFO] Connection opened)");
 
-        this.chat.onOpen(session);
+        chat.onOpen(session);
     }
 
     @OnMessage
@@ -22,7 +22,7 @@ public class ChatEndpoint {
         System.out.println("[INFO] Current Thread ID: " + Thread.currentThread().getId());
         System.out.println("[INFO] Text message received: " + message);
 
-        this.chat.onMessage(session, message);
+        chat.onMessage(session, message);
     }
 
     @OnClose
@@ -30,7 +30,7 @@ public class ChatEndpoint {
         System.out.println("[INFO] Current Thread ID: " + Thread.currentThread().getId());
         System.out.println("[INFO] Connection closed (CloseReason reason phrase: " + reason.getReasonPhrase() + ")");
 
-        this.chat.onClose(session);
+        chat.onClose(session);
     }
 
     @OnError
