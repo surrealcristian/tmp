@@ -3,6 +3,7 @@ package wesoch;
 import com.google.gson.Gson;
 import wesoch.domain.Room;
 import wesoch.domain.User;
+import wesoch.websocket.MessageSendHandler;
 
 import javax.websocket.Session;
 import java.io.IOException;
@@ -17,14 +18,16 @@ public class Chat {
     private final Map<String, Room> roomNameToRoom = Collections.synchronizedMap(new HashMap<>());
     private final Map<String, User> userNameToUser = Collections.synchronizedMap(new HashMap<>());
 
-    private final Map<String, Set<Session>> userNameToSessions = Collections.synchronizedMap(new HashMap<>());
-    private final Map<String, User> sessionIdToUser = Collections.synchronizedMap(new HashMap<>());
+    private final Map<User, Set<Session>> userToSessions = Collections.synchronizedMap(new HashMap<>());
+    private final Map<Session, User> sessionToUser = Collections.synchronizedMap(new HashMap<>());
 
-    private final Map<String, Set<User>> roomNameToUsers = Collections.synchronizedMap(new HashMap<>());
-    private final Map<String, Room> userNameToRoom = Collections.synchronizedMap(new HashMap<>());
+    private final Map<Room, Set<User>> roomToUsers = Collections.synchronizedMap(new HashMap<>());
+    private final Map<User, Room> userToRoom = Collections.synchronizedMap(new HashMap<>());
+
+    private final MessageSendHandler messageSendHandler = new MessageSendHandler();
 
     public void onOpen(Session session) {
-        sessionIdToSession.putIfAbsent(session.getId(), session);
+        addSession(session);
     }
 
     public void onMessage(Session session, String text) {
@@ -45,31 +48,30 @@ public class Chat {
     }
 
     public void onClose(Session session) {
-        User user = sessionIdToUser.get(session.getId());
+        User user = sessionToUser.get(session);
 
         if (user == null) {
             return;
         }
 
 
-        sessionIdToUser.remove(session.getId());
+        sessionToUser.remove(session);
 
 
-        Set<Session> userSessions = userNameToSessions.get(user.getName());
+        Set<Session> userSessions = userToSessions.get(user);
 
         if (userSessions != null) {
             userSessions.remove(session);
         }
 
 
-        Room room = userNameToRoom.get(user.getName());
+        Room room = userToRoom.get(user);
 
         if (room != null) {
-            userNameToRoom.remove(user.getName());
+            userToRoom.remove(user);
         }
 
-
-        roomNameToUsers.remove(room.getName());
+        roomToUsers.remove(room);
 
         userNameToUser.remove(user.getName());
 
@@ -83,34 +85,68 @@ public class Chat {
         }
     }
 
-    private void processInitCommand(Session session, Map<String, Object> data) {
-        final String roomName = (String) data.get("room");
-        final String nickname = (String) data.get("nickname");
+    private void addSession(Session session) {
+        sessionIdToSession.putIfAbsent(session.getId(), session);
+    }
 
-        User user = userNameToUser.putIfAbsent(nickname, new User(nickname));
+    private User getUser(String userName) {
+        User user = userNameToUser.get(userName);
 
-        Set<Session> userSessions = userNameToSessions.putIfAbsent(nickname, Collections.synchronizedSet(new HashSet<>()));
+        if (user == null) {
+            user = new User(userName);
+            userNameToUser.put(userName, user);
+        }
+
+        return user;
+    }
+
+    private void addSessionToUser(Session session, User user) {
+        Set<Session> userSessions = userToSessions.computeIfAbsent(user, k -> Collections.synchronizedSet(new HashSet<>()));
 
         userSessions.add(session);
 
-        sessionIdToUser.putIfAbsent(session.getId(), user);
+        sessionToUser.putIfAbsent(session, user);
+    }
 
-        roomNameToRoom.putIfAbsent(roomName, new Room(roomName));
+    private Room getRoom(String roomName) {
+        Room room = roomNameToRoom.get(roomName);
 
-        roomNameToUsers.putIfAbsent(roomName, Collections.synchronizedSet(new HashSet<>()));
+        if (room == null) {
+            room = new Room(roomName);
+            roomNameToRoom.put(roomName, room);
+        }
 
-        roomNameToUsers.get(roomName).add(user);
+        return room;
+    }
 
-        userNameToRoom.putIfAbsent(nickname, roomNameToRoom.get(roomName));
+    private void addUserToRoom(User user, Room room) {
+        roomToUsers.putIfAbsent(room, Collections.synchronizedSet(new HashSet<>()));
+
+        roomToUsers.get(room).add(user);
+
+        userToRoom.putIfAbsent(user, roomNameToRoom.get(room.getName()));
+    }
+
+    private void processInitCommand(Session session, Map<String, Object> data) {
+        final String roomName = (String) data.get("room"); //TODO: ensure not null
+        final String userName = (String) data.get("nickname"); //TODO: ensure not null
+
+        Room room = getRoom(roomName);
+
+        User user = getUser(userName);
+
+        addSessionToUser(session, user);
+
+        addUserToRoom(user, room);
     }
 
     private void processMessageCommand(Session session, String text) {
-        User user = sessionIdToUser.get(session.getId());
+        User user = sessionToUser.get(session);
 
-        Room room = userNameToRoom.get(user.getName());
+        Room room = userToRoom.get(user);
 
-        for (final User u : roomNameToUsers.get(room.getName())) {
-            for (final Session s : userNameToSessions.get(u.getName())) {
+        for (final User u : roomToUsers.get(room)) {
+            for (final Session s : userToSessions.get(u)) {
                 Gson gson = new Gson();
 
                 ServerToClientMessageData data = new ServerToClientMessageData(user.getName(), LocalDateTime.now(), text);
@@ -119,11 +155,7 @@ public class Chat {
                 command.put("type", "message");
                 command.put("data", data);
 
-                try {
-                    s.getBasicRemote().sendText(gson.toJson(command));
-                } catch (IOException e) {
-                    System.out.println("[ERROR] Could not send the message (" + text + ")");
-                }
+                s.getAsyncRemote().sendText(gson.toJson(command), messageSendHandler);
             }
         }
     }

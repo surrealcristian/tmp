@@ -36,6 +36,6 @@ public class ChatEndpoint {
     @OnError
     public void onError(Session session, Throwable error) {
         System.out.println("[INFO] Current Thread ID: " + Thread.currentThread().getId());
-        System.out.println("[ERROR] Connection error (Error message: " + error.getMessage() + ")");
+        System.out.println("[ERROR] Connection error (Error message: " + error.getMessage() + ". Error: " + error + ")");
     }
 }
